@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>D3 </title>
+        <script type="text/javascript" src="d3/d3.js" charset="utf-8""></script>
+        <style type="text/css">
+		circle.node {
+  			cursor: pointer;
+  			stroke: #000;
+ 			stroke-width: .5px;
+		}
+
+		line.link {
+  			fill: none;
+  			stroke: #A87EE4;
+  			stroke-width: 1px;
+		}
+		#my_text{
+			pointer-events: none;
+		}
+		#my_text.hidden{
+			display: none;
+		}
+		#tooltip {
+        		position: absolute;
+        		width: 200px;
+        		height: auto;
+        		padding: 10px;
+        		background-color: black;
+        		border-radius: 15px;
+        		pointer-events: none;
+		}
+
+		#tooltip.hidden {
+	      		display: none;
+		}
+
+		#tooltip p {
+        		margin: 0;
+		        font-family: verdana;
+				color: white;
+        		font-size: 16px;
+        		line-height: 25px;
+		}
+		.axis path,
+		.axis line {
+    			fill: none;
+    			stroke: white;
+    			shape-rendering: crispEdges;
+		}
+
+		.axis text {         
+   			font-family: castellar;
+    		font-size: 12px;
+			fill: white;
+		}
+		.sc_text{
+			font-family: times;
+			font-size: 15px;
+			fill: white;
+		}
+		h1 {
+				margin: 0;
+				padding: 20px 0;  
+				color: #A752BF;
+				text-shadow: 3px 3px 2px black;
+				text-align: center;
+				font-size: 35px;
+			}
+		div#rad{
+				position: relative;
+				width: 1000px;
+				height: 50px;
+				top: 20%;
+				left: 37%;
+				font-family: castellar;
+				font-size: 20px;
+		    }
+		input[type=range]{
+				position: relative;
+				top: 20%;
+				left: 5%;
+				width: 400px;
+		}
+		</style>
+    </head>
+    <body>
+		<h1>World Population Statistics</h1>
+		<div id="rad">
+		<form>
+       		<label><input type="radio" name="me" id="a" checked> Show Labels </label>
+       		<label><input type="radio" name="me" id="b"> Hide Labels </label>
+        </form>
+	    </div>
+	    <div id="tooltip" class="hidden">
+        	<p><span id="country_name">Country</span></p>
+        	<p><span id="population">0</span></p>
+	    </div>
+		<label for="sel_year" 
+         style="display: inline-block; width: 410px; text-align: right; font-family: castellar;
+		 font-size: 20px; color: blue;">
+         Selected Year = <span id="sel_year-value">2000</span>
+        </label>
+		<input type="range" min="2000" max="2012" value ="2000" id="sel_year">
+		<label for="filter" 
+         style="display: inline-block; width: 530px; text-align: right; font-family: castellar;
+		 font-size: 20px; color: blue;">
+         Filter Value = <span id="filter-value">0</span>
+        </label>
+		<input type="range" min="0" max="100" value ="0" id="filter">
+        <script type="text/javascript">
+			var jsondata;
+			var continents;
+			var dataset;
+			var w=1200;
+			var h = 1200;
+			d3.json("countries.json", function(data){
+				jsondata=data;
+				continents=getContinents(jsondata);
+				continent_names=continents.map(function(x){return x.name});
+				continent_names.push("Earth");
+				dataset=getWorldData(continents, 0);
+				
+				var filter_val= parseInt(d3.select("#filter")[0][0].value)
+				var max_pop= find_max_pop(dataset.children);
+				var threshold=max_pop*parseFloat(filter_val)/100.0
+				dataset2=filter_dataset(dataset.children, threshold);
+				
+				var pack = d3.layout.pack()
+    			           .value(function(d) { return d.current_pop; });
+				
+				pack.nodes(dataset2);
+				
+				var tree = d3.layout.tree();
+			    var nodes = tree.nodes(dataset2);
+				nodes[0].fixed = true;
+				nodes[0].x = w / 2;
+				nodes[0].y = h / 2;
+				
+				var links = tree.links(nodes);
+
+				var force = d3.layout.force()
+							.nodes(nodes)
+							.links(links)
+							.size([w, h ])
+							.charge(function(d) { return d._children ? -d.value / 100000 : -500; })
+							.linkDistance(function(d) { return d.target._children ? 200 : 100; })
+							.start();
+							
+				var svg = d3.select("body")
+				          .append("svg")
+				          .attr("width", w)
+				          .attr("height", h);
+						  
+				var edges = svg.selectAll("line")
+							.data(links)
+							.enter()
+							.append("line")
+							.attr("class", "link");
+				
+				var node = svg.selectAll("circle")
+							.data(nodes)
+							.enter()
+							.append("circle")
+							.attr("class", "node")
+							.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; })
+							.style("fill", color)
+							.on("mouseover", mouse_over)
+							.on("mouseout", mouse_out)
+							.on("click", click)
+							.call(force.drag);
+							
+				var label = svg.selectAll("text")
+							.data(nodes, key)
+							.enter()
+							.append("text")
+							.attr("dx", function(d) {  return d.children ? d.x : d.x   })
+							.attr("dy", function(d) { return d.children ? d.y-d.r-10 : d.y })
+							.style("text-anchor", "middle")
+							.style("font", function(d){ return d.children ? "16px times bold" :"13px sans-serif"})
+							.attr("fill", function(d) { return d.children ? "#D008DE" :"#193A28"})
+							.attr("id", "my_text")
+							.text(function(d) { return d.name; });
+				
+				var key = function(d){
+					return d.name;
+				}
+				
+				force.on("tick", function() {
+					edges.attr("x1", function(d) { return d.source.x; })
+						 .attr("y1", function(d) { return d.source.y; })
+						 .attr("x2", function(d) { return d.target.x; })
+						 .attr("y2", function(d) { return d.target.y; });
+			
+				    node.attr("cx", function(d) { return d.x; })
+				        .attr("cy", function(d) { return d.y; });
+						
+					label.attr("dx", function(d) { return d.children ? d.x : d.x})
+					     .attr("dy", function(d) { return d.children ? d.y-d.r-10 : d.y })
+	
+				});
+				
+				function color(d) {
+				    return d._children ? "#97F3A4" : d.children ? "#D6F1F2" : "#C8A22F";
+				}
+				
+				function mouse_over(d){
+					d3.select(this)
+					  .attr("opacity", "0.5");
+					 
+					
+					var xPos = parseFloat(d3.select(this)[0][0].cx.animVal.value)+5;
+					var yPos = parseFloat(d3.select(this)[0][0].cy.animVal.value)+120;
+					if (!d.children){
+						d3.select("#tooltip")
+							.style("width", "200px")
+							.style("left", xPos + "px")
+							.style("top", yPos + "px")
+							.style("text-align","left")
+							.select("#population")
+							.text(d.current_pop)
+								
+						d3.select("#tooltip")
+							.style("text-align","left")
+							.select("#country_name")
+							.text(d.name)
+							
+						d3.select("#tooltip").classed("hidden", false);
+					}
+				}
+				// mouse out
+				function mouse_out(d){
+					d3.select(this)
+					  .attr("opacity", "1");
+					
+					d3.select("#tooltip").classed("hidden", true);
+				}
+				// click event
+				function click(d) {
+  				if (d.children) {
+					if (d.name == "Earth"){
+						cont_pop=find_sum_pop(dataset2.children);
+					}
+					else{
+					    cont_pop=conti_pop(d.children);
+					}
+    				d._children = d.children;
+   					d.children = null;
+					d.current_pop=cont_pop;
+				  
+				} else {
+    					d.children = d._children;
+    					d._children = null;
+  				}
+				
+				function conti_pop(arr){
+					var _pop=0;
+					for (var i=0; i<arr.length; i++){
+						_pop+=arr[i].current_pop;
+					}
+					return _pop;
+				}
+				
+				if (continent_names.indexOf(d.name)<0){
+					var pop_data=d.all_pop;
+					var pop_dataset=pop_data.map(function(x){return x.population});
+					var years=d3.range(2000, 2013);
+					
+					var w=700;
+					var h=200;
+				    var padding=100;
+					var ypad=5;
+					
+					var xScale=d3.scale.ordinal()
+								 .domain(years)
+								 .rangeRoundBands([padding, w-padding], 0.05)
+								 
+					var yScale=d3.scale.linear()
+								 .domain([0, d3.max(pop_dataset)])
+								 .range([h-ypad, ypad])
+								
+					var yAxis = d3.svg.axis()
+                  		          .scale(yScale)
+                 		          .orient("left")
+					
+					d3.select("#tooltip")
+					  .style("width", "700px")
+					  .select("#population")
+					  .text("")
+					
+					var svg2 = d3.select("#tooltip")
+							    .select("#population")
+            		            .append("svg")
+            		            .attr("width", w)
+            		            .attr("height", h);
+								
+					var bar_colors=d3.scale.category20()
+							
+					svg2.selectAll("rect")
+						.data(pop_dataset)
+						.enter()
+						.append("rect")
+						.attr("y", function(d){return yScale(d)})
+						.attr("x", function(d,i){return xScale(years[i])})
+						.attr("height", function(d){return h-yScale(d)})
+						.attr("width", xScale.rangeBand())
+						.attr("fill", function(d,i){return bar_colors(i)})
+						
+					svg2.selectAll("text")
+						.data(years)
+						.enter()
+						.append("text")
+						.attr("y", function(d){return yScale(d)})
+						.attr("x", function(d,i){return xScale(years[i])})
+						.attr("class", "sc_text")
+						.text(function(d){return d});
+							
+					svg2.append("g")
+						.attr("class", "axis")
+						.attr("transform", "translate(" + padding + ",0)")
+						.call(yAxis);
+					
+				}
+				
+				else{
+				//update links
+				
+                nodes.forEach(function(element) {
+  					element._x=element.x
+					element._y=element.y
+				});
+				nodes = tree.nodes(dataset2);
+                nodes.forEach(function(element) {
+  					element.x=element._x
+					element.y=element._y
+				});
+				nodes[0].fixed = true;
+				nodes[0].x = w / 2;
+				nodes[0].y = h / 2;
+				links = tree.links(nodes);
+			
+				// Restart the force layout.
+  				force.nodes(nodes)
+      				 .links(links)
+      			     .start();
+		
+				edges = svg.selectAll("line.link")
+					    .data(links);
+				
+				//Create new edges 
+				edges.enter()
+					.insert("line", ".node")
+					.attr("class", "link");
+
+				//Delete edges
+				edges.exit()
+					.remove();
+
+
+				node = svg.selectAll("circle")
+					.data(nodes, key)
+					.style("fill", color)
+					.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; });
+
+				//Create new nodes 
+				node.enter()
+					.append("circle")
+					.attr("class", "node")
+					.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; })
+					.style("fill", color)
+					.on("mouseover", mouse_over)
+					.on("mouseout", mouse_out)
+ 					.on("click", click)
+					.call(force.drag);
+
+				//remove nodes 
+				node.exit()
+					.remove();
+					
+			    label = svg.selectAll("text#my_text")
+							.data(nodes, key);
+				
+				label.enter()
+				     .append("text")
+					 .attr("id", "my_text")
+					 .attr("dx", function(d) {  return d.children ? d.x : d.x   })
+					 .attr("dy", function(d) { return d.children ? d.y-d.r-10 : d.y })
+					 .style("text-anchor", "middle")
+					 .style("font", function(d){ return d.children ? "16px times bold" :"13px sans-serif"})
+					 .attr("fill", function(d) { return d.children ? "#D008DE" :"#193A28"})
+				     .text(function(d) { return d.name; });
+					 
+			    label.exit()
+					.remove();
+				
+				var rad_val=d3.select('input[name="me"]:checked').property("id")
+				if (rad_val=="a"){
+					d3.selectAll("text#my_text").classed("hidden", false);
+				}else{
+					d3.selectAll("text#my_text").classed("hidden", true);
+				}
+				}
+			    }
+				
+				d3.select("input#a").on("click", function() {
+					d3.selectAll("text#my_text").classed("hidden", false);
+				})
+			
+				d3.select("input#b").on("click", function() {
+					d3.selectAll("text#my_text").classed("hidden", true);
+				})
+				
+				d3.select("#sel_year").on("input", function() {
+  			        update_rate(this.value);
+					var years=d3.range(2000, 2013);
+					var s_year=parseInt(this.value);
+					var s_year_ind=years.indexOf(s_year);
+					dataset=getWorldData(continents, s_year_ind);
+					
+					var filter_val= parseInt(d3.select("#filter")[0][0].value)
+					var max_pop= find_max_pop(dataset.children);
+					var threshold=max_pop*parseFloat(filter_val)/100.0
+					dataset2=filter_dataset(dataset.children, threshold);
+					
+					pack.nodes(dataset2);
+					nodes = tree.nodes(dataset2);
+					links = tree.links(nodes);
+					
+					force.nodes(nodes)
+      				 .links(links)
+      			     .start();
+		
+					edges = svg.selectAll("line.link")
+							.data(links);
+					
+					//Create new edges 
+					edges.enter()
+						.insert("line", ".node")
+						.attr("class", "link");
+
+					//Delete edges
+					edges.exit()
+						.remove();
+
+
+					node = svg.selectAll("circle")
+						.data(nodes, key)
+						.style("fill", color)
+						.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; });
+
+					//Create new nodes 
+					node.enter()
+						.append("circle")
+						.attr("class", "node")
+						.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; })
+						.style("fill", color)
+						.on("mouseover", mouse_over)
+						.on("mouseout", mouse_out)
+						.on("click", click)
+						.call(force.drag);
+
+					//remove nodes 
+					node.exit()
+						.remove();
+						
+					label = svg.selectAll("text#my_text")
+								.data(nodes, key);
+					
+					label.enter()
+						 .append("text")
+						 .attr("id", "my_text")
+						 .attr("dx", function(d) {  return d.children ? d.x : d.x   })
+						 .attr("dy", function(d) { return d.children ? d.y-d.r-10 : d.y })
+						 .style("text-anchor", "middle")
+						 .style("font", function(d){ return d.children ? "16px times bold" :"13px sans-serif"})
+						 .attr("fill", function(d) { return d.children ? "#D008DE" :"#193A28"})
+						 .text(function(d) { return d.name; });
+						 
+					label.exit()
+						.remove();
+						
+					var rad_val=d3.select('input[name="me"]:checked').property("id")
+					if (rad_val=="a"){
+						d3.selectAll("text#my_text").classed("hidden", false);
+					}else{
+						d3.selectAll("text#my_text").classed("hidden", true);
+					}
+					
+		        });
+				
+				d3.select("#filter").on("input", function() {
+  			        update_filter(this.value);
+					var max_pop= find_max_pop(dataset.children);
+					var threshold=max_pop*parseFloat(this.value)/100.0
+					dataset2=filter_dataset(dataset.children, threshold);
+					
+					pack.nodes(dataset2);
+					nodes = tree.nodes(dataset2);
+					links = tree.links(nodes);
+					
+					force.nodes(nodes)
+      				 .links(links)
+      			     .start();
+		
+					edges = svg.selectAll("line.link")
+							.data(links);
+					
+					//Create new edges 
+					edges.enter()
+						.insert("line", ".node")
+						.attr("class", "link");
+
+					//Delete edges
+					edges.exit()
+						.remove();
+
+
+					node = svg.selectAll("circle")
+						.data(nodes, key)
+						.style("fill", color)
+						.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; });
+
+					//Create new nodes 
+					node.enter()
+						.append("circle")
+						.attr("class", "node")
+						.attr("r", function(d) { return d.children ? 6 : Math.sqrt(d.value) / 650; })
+						.style("fill", color)
+						.on("mouseover", mouse_over)
+						.on("mouseout", mouse_out)
+						.on("click", click)
+						.call(force.drag);
+
+					//remove nodes 
+					node.exit()
+						.remove();
+						
+					label = svg.selectAll("text#my_text")
+								.data(nodes, key);
+					
+					label.enter()
+						 .append("text")
+						 .attr("id", "my_text")
+						 .attr("dx", function(d) {  return d.children ? d.x : d.x   })
+						 .attr("dy", function(d) { return d.children ? d.y-d.r-10 : d.y })
+						 .style("text-anchor", "middle")
+						 .style("font", function(d){ return d.children ? "16px times bold" :"13px sans-serif"})
+						 .attr("fill", function(d) { return d.children ? "#D008DE" :"#193A28"})
+						 .text(function(d) { return d.name; });
+						 
+					label.exit()
+						.remove();
+						
+					var rad_val=d3.select('input[name="me"]:checked').property("id")
+					if (rad_val=="a"){
+						d3.selectAll("text#my_text").classed("hidden", false);
+					}else{
+						d3.selectAll("text#my_text").classed("hidden", true);
+					}
+				});
+				
+				
+				function update_rate(rate){
+					d3.select("#sel_year-value").text(rate);
+				}
+				function update_filter(val){
+					d3.select("#filter-value").text(val)
+				}
+				
+			});
+			// define constuctor for continents
+			function Continent(name){
+				this.name=name;
+				this.countries=[];
+			};
+			// define constructor for countries
+			function Country(name, conti){
+				this.name=name;
+				this.continent=conti;
+				this.years=[];  // will contain pop data for each year
+			};
+			var getContinents = function(data){
+				var continent_names=[];
+				var all_continents=[];
+				for (var i=0; i<data.length; i++){
+					if (continent_names.indexOf(data[i].continent)<0){
+						continent_names.push(data[i].continent);
+						var cont= new Continent(data[i].continent);
+						all_continents.push(cont);
+					}
+					var country= new Country(data[i].name, data[i].continent);
+					country.years=getPopulation(data[i].years);
+					for (var j=0; j<all_continents.length; j++){
+						if (all_continents[j].name == country.continent){
+							all_continents[j].countries.push(country);
+						} 
+					}
+				}
+				return all_continents;
+			
+			};
+			var getPopulation = function(yr_data){
+				var result=[];
+				for (var i=0; i<yr_data.length; i++){
+					if (yr_data[i].year >= 2000){
+						var pop_obj= new Object();
+						pop_obj.year = yr_data[i].year;
+						pop_obj.population = yr_data[i].population;
+						result.push(pop_obj);
+					}
+				}
+				return result;
+			};
+			var getWorldData = function(conts, year_ind){
+				var world_data = new Object();
+				world_data.name ="Earth";
+				world_data.children = [];
+				for (var i=0; i<conts.length; i++){
+					cont_data = new Object();
+					cont_data.name = conts[i].name;
+					cont_data.children = [];
+					for (var j=0; j<conts[i].countries.length; j++){
+						country_data = new Object();
+						country_data.name = conts[i].countries[j].name;
+						country_data.all_pop = conts[i].countries[j].years;
+						country_data.current_pop = conts[i].countries[j].years[year_ind].population
+						cont_data.children.push(country_data);
+					};
+					world_data.children.push(cont_data);
+				};
+				return world_data;
+			};
+			
+			var find_max_pop = function(conts){
+				var all_pops=[];
+				for (var i =0; i<conts.length; i++){
+					var countries=conts[i].children;
+					for (var j=0; j<countries.length; j++){
+						all_pops.push(countries[j].current_pop)
+					}
+				}
+				return d3.max(all_pops);
+			}
+			
+			var find_sum_pop = function(conts){
+				var al_pops=[];
+				for (var i =0; i<conts.length; i++){
+					var countries=conts[i].children;
+					for (var j=0; j<countries.length; j++){
+						al_pops.push(countries[j].current_pop)
+					}
+				}
+				var res=al_pops.reduce(function(a,b){ return a+b});
+				return res;
+			}
+			
+			
+			var filter_dataset = function(contis, thresh){
+			    var new_ds = new Object();
+				new_ds.name = "Earth";
+				new_ds.children = [];
+				for (var i=0; i<contis.length; i++){
+					//new_ds.children.push(contis[i]);
+					var conti_obj= new Object();
+					conti_obj.name = contis[i].name;
+					conti_obj.children = contis[i].children.filter(function(x){
+						return x.current_pop >thresh;
+					})
+					new_ds.children.push(conti_obj);
+				}
+				new_ds.children=new_ds.children.filter(function(x){
+					return x.children.length>0;
+				});
+				return new_ds;
+			}
+        </script>
+		
+    </body>
+</html>
